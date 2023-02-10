@@ -78,13 +78,13 @@ EOF
 
 	if [ -n "$FW4" ]; then
 		nft 'add chain inet fw4 adguardhome_dns_redirect' 2>/dev/null
-		nft add rule inet fw4 adguardhome_dns_redirect tcp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
-		nft add rule inet fw4 adguardhome_dns_redirect udp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 adguardhome_dns_redirect tcp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdguardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 adguardhome_dns_redirect udp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdguardHome DNS Hijack\" 2>/dev/null
 		nft 'add rule inet fw4 dstnat position 0 tcp dport 53 counter jump adguardhome_dns_redirect' 2>/dev/null
 		nft 'add rule inet fw4 dstnat position 0 udp dport 53 counter jump adguardhome_dns_redirect' 2>/dev/null
 		nft 'add chain inet fw4 nat_output { type nat hook output priority -1; }' 2>/dev/null
-		nft add rule inet fw4 nat_output position 0 tcp dport 53 ip daddr {127.0.0.1} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
-		nft add rule inet fw4 nat_output position 0 udp dport 53 ip daddr {127.0.0.1} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 nat_output position 0 tcp dport 53 ip daddr {127.0.0.1} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdguardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 nat_output position 0 udp dport 53 ip daddr {127.0.0.1} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdguardHome DNS Hijack\" 2>/dev/null
 	else
 		IPS="`ifconfig | grep "inet addr" | grep -v ":127" | grep "Bcast" | awk '{print $2}' | awk -F : '{print $2}'`"
 		for IP in $IPS
@@ -101,11 +101,11 @@ EOF
 	fi
 
 	if [ -n "$FW4" ]; then
-		nft insert rule inet fw4 adguardhome_dns_redirect position 0 meta nfproto {ipv6} tcp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
-		nft insert rule inet fw4 adguardhome_dns_redirect position 0 meta nfproto {ipv6} udp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft insert rule inet fw4 adguardhome_dns_redirect position 0 meta nfproto {ipv6} tcp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdguardHome DNS Hijack\" 2>/dev/null
+		nft insert rule inet fw4 adguardhome_dns_redirect position 0 meta nfproto {ipv6} udp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdguardHome DNS Hijack\" 2>/dev/null
 		nft 'add chain inet fw4 nat_output { type nat hook output priority -1; }' 2>/dev/null
-		nft add rule inet fw4 nat_output position 0 meta nfproto {ipv6} tcp dport 53 ip daddr {::/0} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
-		nft add rule inet fw4 nat_output position 0 meta nfproto {ipv6} udp dport 53 ip daddr {::/0} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 nat_output position 0 meta nfproto {ipv6} tcp dport 53 ip daddr {::/0} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdguardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 nat_output position 0 meta nfproto {ipv6} udp dport 53 ip daddr {::/0} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdguardHome DNS Hijack\" 2>/dev/null
 	else
 		IPS="`ifconfig | grep "inet6 addr" | grep -v " fe80::" | grep -v " ::1" | grep "Global" | awk '{print $3}'`"
 		for IP in $IPS
@@ -127,13 +127,13 @@ clear_iptable()
 EOF
 	 if [ -n "$FW4" ]; then
 	    for nft in "input" "forward" "dstnat" "srcnat" "nat_output" "mangle_prerouting" "mangle_output"; do
-		   local handles=$(nft -a list chain inet fw4 ${nft} |grep -E "adgardHome|AdgardHome" |awk -F '# handle ' '{print$2}')
+		   local handles=$(nft -a list chain inet fw4 ${nft} |grep -E "adguardhome|AdguardHome" |awk -F '# handle ' '{print$2}')
 		   for handle in $handles; do
 	          nft delete rule inet fw4 ${nft} handle ${handle}
 	       done
 	    done >/dev/null 2>&1
 
-	    for handle in $(nft -a list chains |grep -E "chain adgardHome|AdgardHome" |awk -F '# handle ' '{print$2}'); do
+	    for handle in $(nft -a list chains |grep -E "chain adguardhome|AdguardHome" |awk -F '# handle ' '{print$2}'); do
 	       nft delete chain inet fw4 handle ${handle}
 	    done >/dev/null 2>&1
 	else
