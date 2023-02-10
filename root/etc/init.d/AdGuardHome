@@ -5,6 +5,8 @@ USE_PROCD=1
 START=95
 STOP=01
 
+FW4=$(command -v fw4)
+
 CONFIGURATION=AdGuardHome
 CRON_FILE=/etc/crontabs/root
 GFWSET="gfwlist"
@@ -74,27 +76,46 @@ set_iptable()
 	commit firewall
 EOF
 
-	IPS="`ifconfig | grep "inet addr" | grep -v ":127" | grep "Bcast" | awk '{print $2}' | awk -F : '{print $2}'`"
-	for IP in $IPS
-	do
-		if [ "$tcp_server" == "1" ]; then
-			iptables -t nat -A PREROUTING -p tcp -d $IP --dport 53 -j REDIRECT --to-ports $AdGuardHome_PORT >/dev/null 2>&1
-		fi
-		iptables -t nat -A PREROUTING -p udp -d $IP --dport 53 -j REDIRECT --to-ports $AdGuardHome_PORT >/dev/null 2>&1
-	done
+	if [ -n "$FW4" ]; then
+		nft 'add chain inet fw4 adguardhome_dns_redirect' 2>/dev/null
+		nft add rule inet fw4 adguardhome_dns_redirect tcp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 adguardhome_dns_redirect udp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft 'add rule inet fw4 dstnat position 0 tcp dport 53 counter jump adguardhome_dns_redirect' 2>/dev/null
+		nft 'add rule inet fw4 dstnat position 0 udp dport 53 counter jump adguardhome_dns_redirect' 2>/dev/null
+		nft 'add chain inet fw4 nat_output { type nat hook output priority -1; }' 2>/dev/null
+		nft add rule inet fw4 nat_output position 0 tcp dport 53 ip daddr {127.0.0.1} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 nat_output position 0 udp dport 53 ip daddr {127.0.0.1} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+	else
+		IPS="`ifconfig | grep "inet addr" | grep -v ":127" | grep "Bcast" | awk '{print $2}' | awk -F : '{print $2}'`"
+		for IP in $IPS
+		do
+			if [ "$tcp_server" == "1" ]; then
+				iptables -t nat -A PREROUTING -p tcp -d $IP --dport 53 -j REDIRECT --to-ports $AdGuardHome_PORT >/dev/null 2>&1
+			fi
+			iptables -t nat -A PREROUTING -p udp -d $IP --dport 53 -j REDIRECT --to-ports $AdGuardHome_PORT >/dev/null 2>&1
+		done
+	fi
 
 	if [ "$ipv6_server" == 0 ]; then
 		return
 	fi
 
-	IPS="`ifconfig | grep "inet6 addr" | grep -v " fe80::" | grep -v " ::1" | grep "Global" | awk '{print $3}'`"
-	for IP in $IPS
-	do
-		if [ "$tcp_server" == "1" ]; then
-			ip6tables -t nat -A PREROUTING -p tcp -d $IP --dport 53 -j REDIRECT --to-ports $AdGuardHome_PORT >/dev/null 2>&1
-		fi
-		ip6tables -t nat -A PREROUTING -p udp -d $IP --dport 53 -j REDIRECT --to-ports $AdGuardHome_PORT >/dev/null 2>&1
-	done
+	if [ -n "$FW4" ]; then
+		nft insert rule inet fw4 adguardhome_dns_redirect position 0 meta nfproto {ipv6} tcp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft insert rule inet fw4 adguardhome_dns_redirect position 0 meta nfproto {ipv6} udp dport 53 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft 'add chain inet fw4 nat_output { type nat hook output priority -1; }' 2>/dev/null
+		nft add rule inet fw4 nat_output position 0 meta nfproto {ipv6} tcp dport 53 ip daddr {::/0} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+		nft add rule inet fw4 nat_output position 0 meta nfproto {ipv6} udp dport 53 ip daddr {::/0} meta skuid != 65534 counter redirect to "$AdGuardHome_PORT" comment \"AdgardHome DNS Hijack\" 2>/dev/null
+	else
+		IPS="`ifconfig | grep "inet6 addr" | grep -v " fe80::" | grep -v " ::1" | grep "Global" | awk '{print $3}'`"
+		for IP in $IPS
+		do
+			if [ "$tcp_server" == "1" ]; then
+				ip6tables -t nat -A PREROUTING -p tcp -d $IP --dport 53 -j REDIRECT --to-ports $AdGuardHome_PORT >/dev/null 2>&1
+			fi
+			ip6tables -t nat -A PREROUTING -p udp -d $IP --dport 53 -j REDIRECT --to-ports $AdGuardHome_PORT >/dev/null 2>&1
+		done
+	fi
 
 }
 
@@ -104,26 +125,38 @@ clear_iptable()
   delete firewall.AdGuardHome
 	commit firewall
 EOF
-	local OLD_PORT="$1"
-	local ipv6_server=$2
-	IPS="`ifconfig | grep "inet addr" | grep -v ":127" | grep "Bcast" | awk '{print $2}' | awk -F : '{print $2}'`"
-	for IP in $IPS
-	do
-		iptables -t nat -D PREROUTING -p udp -d $IP --dport 53 -j REDIRECT --to-ports $OLD_PORT >/dev/null 2>&1
-		iptables -t nat -D PREROUTING -p tcp -d $IP --dport 53 -j REDIRECT --to-ports $OLD_PORT >/dev/null 2>&1
-	done
+	 if [ -n "$FW4" ]; then
+	    for nft in "input" "forward" "dstnat" "srcnat" "nat_output" "mangle_prerouting" "mangle_output"; do
+		   local handles=$(nft -a list chain inet fw4 ${nft} |grep -E "adgardHome|AdgardHome" |awk -F '# handle ' '{print$2}')
+		   for handle in $handles; do
+	          nft delete rule inet fw4 ${nft} handle ${handle}
+	       done
+	    done >/dev/null 2>&1
 
-	if [ "$ipv6_server" == 0 ]; then
-		return
+	    for handle in $(nft -a list chains |grep -E "chain adgardHome|AdgardHome" |awk -F '# handle ' '{print$2}'); do
+	       nft delete chain inet fw4 handle ${handle}
+	    done >/dev/null 2>&1
+	else
+		local OLD_PORT="$1"
+		local ipv6_server=$2
+		IPS="`ifconfig | grep "inet addr" | grep -v ":127" | grep "Bcast" | awk '{print $2}' | awk -F : '{print $2}'`"
+		for IP in $IPS
+		do
+			iptables -t nat -D PREROUTING -p udp -d $IP --dport 53 -j REDIRECT --to-ports $OLD_PORT >/dev/null 2>&1
+			iptables -t nat -D PREROUTING -p tcp -d $IP --dport 53 -j REDIRECT --to-ports $OLD_PORT >/dev/null 2>&1
+		done
+
+		if [ "$ipv6_server" == 0 ]; then
+			return
+		fi
+		echo "warn ip6tables nat mod is needed"
+		IPS="`ifconfig | grep "inet6 addr" | grep -v " fe80::" | grep -v " ::1" | grep "Global" | awk '{print $3}'`"
+		for IP in $IPS
+		do
+			ip6tables -t nat -D PREROUTING -p udp -d $IP --dport 53 -j REDIRECT --to-ports $OLD_PORT >/dev/null 2>&1
+			ip6tables -t nat -D PREROUTING -p tcp -d $IP --dport 53 -j REDIRECT --to-ports $OLD_PORT >/dev/null 2>&1
+		done
 	fi
-	echo "warn ip6tables nat mod is needed"
-	IPS="`ifconfig | grep "inet6 addr" | grep -v " fe80::" | grep -v " ::1" | grep "Global" | awk '{print $3}'`"
-	for IP in $IPS
-	do
-		ip6tables -t nat -D PREROUTING -p udp -d $IP --dport 53 -j REDIRECT --to-ports $OLD_PORT >/dev/null 2>&1
-		ip6tables -t nat -D PREROUTING -p tcp -d $IP --dport 53 -j REDIRECT --to-ports $OLD_PORT >/dev/null 2>&1
-	done
-
 }
 
 service_triggers() {
@@ -220,7 +253,7 @@ _do_redirect()
 	local section="$CONFIGURATION"
 	args=""
 	ipv6_server=1
-	tcp_server=0
+	tcp_server=1
 	enabled=$1
 	if [ "$enabled" == "1" ]; then
 		echo -n "1">/var/run/AdGredir
